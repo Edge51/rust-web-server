@@ -2,3 +2,4 @@
 members = [
     "webservice"
 ]
+resolver = "2"
