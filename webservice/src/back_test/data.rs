@@ -84,3 +84,15 @@ pub struct StockData {
     #[serde(rename = "换手率")]
     pub change: Option<f64>,
 }
+
+#[derive(Debug)]
+pub struct Order {
+    price: f64,
+    amount: u32,
+}
+pub enum Event {
+    OnCandle(Candle),
+    OnOrder(Order),
+}
+
+pub struct Audit;
