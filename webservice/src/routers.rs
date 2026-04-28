@@ -1,9 +1,14 @@
 use actix_web::web;
-use crate::handlers::{get_courses_for_teacher, health_check_handler, stock_data_handler};
+use crate::handlers::{get_courses_for_teacher, health_check_handler, run_default_engine, stock_data_handler};
 use crate::handlers::new_course;
 
 pub fn general_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/health", web::get().to(health_check_handler));
+}
+
+pub fn backtest_routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(web::scope("/backtest"))
+        .route("/back_test", web::get().to(run_default_engine));
 }
 pub fn course_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(web::scope("/courses"))

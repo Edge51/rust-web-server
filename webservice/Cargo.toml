@@ -10,5 +10,6 @@ chrono = { version = "0.4.39", features = ["serde"] }
 serde = { version = "1.0.217", features = ["derive"] }
 csv = "1.4.0"
 anyhow = "1.0.102"
-tokio = "1.52.1"
+tokio = { version = "1.52.1", features = ["full"] }
+tokio-macros = { version = "0.2.0-alpha.6" }
 tokio-stream = "0.1.18"

@@ -6,6 +6,8 @@ use crate::models::Course;
 use crate::state::AppState;
 use csv;
 use crate::back_test::data::StockData;
+use crate::back_test::engine::Engine;
+use crate::back_test::strategy::DefaultStrategy;
 
 pub async  fn health_check_handler(
     app_state: web::Data<AppState>,
@@ -52,15 +54,15 @@ pub async fn stock_data_handler(
                           record.date,
                           record.code,
                           record.open,
-                          record.close.unwrap(),
-                          record.high.unwrap(),
-                          record.low.unwrap(),
-                          record.volume.unwrap(),
-                          record.amount.unwrap(),
-                          record.amplitude.unwrap(),
-                          record.diff.unwrap(),
-                          record.diff_ref.unwrap(),
-                          record.change.unwrap()
+                          record.close,
+                          record.high,
+                          record.low,
+                          record.volume,
+                          record.amount,
+                          record.amplitude,
+                          record.diff,
+                          record.diff_ref,
+                          record.change
         );
         csv_content.push_str(line.as_str());
     }
@@ -87,6 +89,16 @@ pub async fn get_courses_for_teacher(
     } else {
         HttpResponse::Ok().json("No courses founded for this teacher".to_string())
     }
+}
+
+pub async fn run_default_engine(
+) -> HttpResponse {
+    println!("Starting default engine");
+    let mut engine = Engine::new(DefaultStrategy);
+    let audit = engine.run_backtest().await;
+    HttpResponse::Ok()
+        .content_type("text/txt; charset=utf-8")
+        .body("run default engine, audit.profit:{77.7}")
 }
 
 #[cfg(test)]

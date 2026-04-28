@@ -1,9 +1,10 @@
 use std::ops::Bound::Included;
 use anyhow::Result;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, SecondsFormat};
 use serde::Deserialize;
 
 pub const FAILED: &str = "Condition failed";
+#[derive(Debug)]
 pub struct Candle {
     pub open: f64,
     pub close: f64,
@@ -66,23 +67,36 @@ pub struct StockData {
     #[serde(rename = "开盘")]
     pub open: f64,
     #[serde(rename = "收盘")]
-    pub close: Option<f64>,
+    pub close: f64,
     #[serde(rename = "最高")]
-    pub high: Option<f64>,
+    pub high: f64,
     #[serde(rename = "最低")]
-    pub low: Option<f64>,
+    pub low: f64,
     #[serde(rename = "成交量")]
-    pub volume: Option<f64>,
+    pub volume: f64,
     #[serde(rename = "成交额")]
-    pub amount: Option<f64>,
+    pub amount: f64,
     #[serde(rename = "振幅")]
-    pub amplitude: Option<f64>,
+    pub amplitude: f64,
     #[serde(rename = "涨跌幅")]
-    pub diff_ref: Option<f64>,
+    pub diff_ref: f64,
     #[serde(rename = "涨跌额")]
-    pub diff: Option<f64>,
+    pub diff: f64,
     #[serde(rename = "换手率")]
-    pub change: Option<f64>,
+    pub change: f64,
+}
+
+impl StockData {
+    pub fn into_candle(self) -> Candle {
+        Candle::new(
+            self.open,
+            self.close,
+            self.high,
+            self.low,
+            self.volume,
+            self.amount,
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -90,9 +104,29 @@ pub struct Order {
     price: f64,
     amount: u32,
 }
+impl Order {
+    pub fn new(price: f64, amount: u32) -> Self {
+        Self { price, amount }
+    }
+}
 pub enum Event {
     OnCandle(Candle),
     OnOrder(Order),
+    OnTerminate,
 }
 
-pub struct Audit;
+pub struct Audit {
+    profit: f64
+}
+
+impl Audit {
+    pub fn new(profit: f64) -> Self {
+        Self { profit }
+    }
+    pub fn show_profit(&self) {
+        println!("{}", self.profit);
+    }
+    pub fn get_profit(&self) -> f64 {
+        self.profit
+    }
+}
