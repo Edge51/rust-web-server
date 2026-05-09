@@ -28,23 +28,34 @@ where OrderStrategy: 'static + Strategy + Send
         let tx = self.event_tx.clone();
         tokio::spawn(async move {
             let candles = Self::read_data_from_csv();
+            let mut sent_cnt = 0;
             candles.into_iter()
                 .for_each(|candle| {
-                    tx.send(Event::OnCandle(candle)).unwrap()
+                    tx.send(Event::OnCandle(candle)).unwrap();
+                    sent_cnt += 1;
+                    println!("sent_cnt {sent_cnt}")
                 });
         });
+        let mut order_cnt = 0;
+        let mut candle_cnt = 0;
         while let Some(event) = self.event_rx.recv().await {
             match event {
                 Event::OnCandle(candle) => {
+                    candle_cnt += 1;
                     let orders = self.strategy.generate_orders(Event::OnCandle(candle));
                     for order in orders {
                         self.event_tx.send(Event::OnOrder(order)).expect("Send order failed");
                     }
                 },
                 Event::OnOrder(order) => {
-                    println!("OnOrder:{:?}", order)
+                    order_cnt += 1;
+                    println!("OnOrder:{:?}, candle_cnt{candle_cnt}, order_cnt{order_cnt}", order);
+                    if order_cnt == candle_cnt {
+                        self.event_tx.send(Event::OnTerminate).expect("Send Terminate signal failed");
+                    }
                 },
                 Event::OnTerminate => {
+                    println!("OnTerminate");
                     break;
                 }
             }
@@ -65,9 +76,11 @@ where OrderStrategy: 'static + Strategy + Send
     }
 }
 
+#[cfg(test)]
 mod test {
     use crate::back_test::strategy::DefaultStrategy;
     use super::*;
+
 
     #[tokio::test]
     async fn test_run_backtest() {

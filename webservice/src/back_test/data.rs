@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Bound::Included;
 use anyhow::Result;
 use chrono::{NaiveDate, SecondsFormat};
@@ -109,6 +110,18 @@ impl Order {
         Self { price, amount }
     }
 }
+
+pub struct Position {
+    price: f64,
+    amount: u32,
+}
+
+pub struct Portfolio {
+    cash: f64,
+    positions: HashMap<String, Position>,
+    pub total_value: f64,
+}
+
 pub enum Event {
     OnCandle(Candle),
     OnOrder(Order),
