@@ -1,0 +1,39 @@
+#!/bin/sh
+#
+# commit-msg hook: 校验 Git 提交信息是否符合约定格式
+# 关联文件: .gitmessage
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# 允许以 # 开头的行（注释行）和空行
+# 跳过仅包含注释的行后，检查第一条非注释行
+FIRST_LINE=$(grep -v '^[[:space:]]*#' "$COMMIT_MSG_FILE" | grep -v '^[[:space:]]*$' | head -n 1)
+
+# 正则匹配格式: type(scope): subject 或 type: subject
+# type 允许: feat, fix, refactor, perf, test, docs, style, chore
+PATTERN='^(feat|fix|refactor|perf|test|docs|style|chore)(\([a-zA-Z0-9._-]+\))?: .+'
+
+if echo "$FIRST_LINE" | grep -qE "$PATTERN"; then
+    exit 0
+fi
+
+echo ""
+echo "  ⚠️  Git 提交信息格式不正确!"
+echo ""
+echo "  第一行必须符合: <type>(<scope>): <subject>"
+echo "  或              <type>: <subject>"
+echo ""
+echo "  type 允许值: feat | fix | refactor | perf | test | docs | style | chore"
+echo "  scope 可选:  如 P1, engine, data 等"
+echo ""
+echo "  示例:"
+echo "    feat(P1): 实现订单撮合引擎"
+echo "    fix: 修复 Portfolio 现金计算溢出"
+echo "    docs: 更新 README 开发计划"
+echo "    test: 新增 Candle 校验单元测试"
+echo ""
+echo "  详情请参考项目根目录的 .gitmessage 模板。"
+echo ""
+
+exit 1
