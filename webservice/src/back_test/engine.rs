@@ -68,9 +68,11 @@ where OrderStrategy: 'static + Strategy + Send
         let mut reader = csv::Reader::from_reader(file);
         let mut candles: Vec<Candle> = Vec::new();
         for row in reader.deserialize() {
-            let record: StockData
-                = row.unwrap();
-            candles.push(record.into_candle())
+            let record: StockData = row.unwrap();
+            match record.into_candle() {
+                Ok(candle) => candles.push(candle),
+                Err(e) => eprintln!("Skipping invalid candle: {:?}", e),
+            }
         }
         candles
     }

@@ -1,4 +1,4 @@
-use super::data::{Event, Order};
+use super::data::{Event, Order, OrderType};
 
 pub trait Strategy {
     type OrderIter: Iterator<Item = Order>;
@@ -23,7 +23,7 @@ impl Strategy for DefaultStrategy {
             }
         }
         let mut orders = Vec::new();
-        let order = Order::new(66.6, 100);
+        let order = Order::new("600000".to_string(), OrderType::Buy, 66.6, 100);
         orders.push(order);
         orders.into_iter()
     }
