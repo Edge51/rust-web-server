@@ -6,8 +6,6 @@ use crate::models::Course;
 use crate::state::AppState;
 use csv;
 use crate::back_test::data::StockData;
-use crate::back_test::engine::Engine;
-use crate::back_test::strategy::DefaultStrategy;
 
 pub async  fn health_check_handler(
     app_state: web::Data<AppState>,
@@ -94,8 +92,6 @@ pub async fn get_courses_for_teacher(
 pub async fn run_default_engine(
 ) -> HttpResponse {
     println!("Starting default engine");
-    let mut engine = Engine::new(DefaultStrategy);
-    let audit = engine.run_backtest().await;
     HttpResponse::Ok()
         .content_type("text/txt; charset=utf-8")
         .body("run default engine, audit.profit:{77.7}")
@@ -106,7 +102,6 @@ mod tests {
     use std::sync::Mutex;
     use super::*;
     use actix_web::http::StatusCode;
-    use actix_web::test;
     #[actix_rt::test]
     async fn test_health_check_handler() {}
 

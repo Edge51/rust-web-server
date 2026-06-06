@@ -1494,6 +1494,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "csv",
+ "log",
  "serde",
  "tokio",
  "tokio-macros 0.2.6",

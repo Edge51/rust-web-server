@@ -10,21 +10,21 @@ pub struct DefaultStrategy;
 impl Strategy for DefaultStrategy {
     type OrderIter = std::vec::IntoIter<Order>;
     fn generate_orders(&mut self, event: Event) -> Self::OrderIter {
-        match event {
+        let order = match event {
             Event::OnCandle(candle) => {
-                if candle.close > candle.low {
-                    println!("CLOSE: {} > OPEN :{}, candle{:?}", candle.close, candle.open, candle);
+                if candle.close >= 400.0 {
+                    Some(Order::new(candle.instrument_id, OrderType::Sell, candle.close, 100))
+                } else if candle.close <= 200.0 {
+                    Some(Order::new(candle.instrument_id, OrderType::Buy, candle.close, 100))
                 } else {
-                    println!("CLOSE: {} <= OPEN :{}, candle{:?}", candle.close, candle.open, candle);
+                    None
                 }
             },
-            _ => {
-                println!("Event not candle should not pass to strategy default");
-            }
-        }
+        };
         let mut orders = Vec::new();
-        let order = Order::new("600000".to_string(), OrderType::Buy, 66.6, 100);
-        orders.push(order);
+        if let Some(order) = order {
+            orders.push(order);
+        }
         orders.into_iter()
     }
 }

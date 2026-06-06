@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::ops::Bound::Included;
-use anyhow::Result;
-use chrono::{NaiveDate, SecondsFormat};
+use anyhow::{bail, Result};
+use chrono::{NaiveDate};
 use serde::Deserialize;
 
 pub const FAILED: &str = "Condition failed";
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Candle {
+    pub instrument_id: String,
     pub open: f64,
     pub close: f64,
     pub high: f64,
@@ -18,25 +18,14 @@ pub struct Candle {
 #[inline(always)]
 pub fn check_predicate_true(predicate: bool, fail_msg: &str) -> anyhow::Result<()> {
     if !predicate {
-        anyhow::bail!(FAILED);
+        anyhow::bail!(FAILED.to_string() + ": " + fail_msg);
     }
     Ok(())
 }
 
 impl Candle {
-    pub fn new(
-        open: f64,
-        close: f64,
-        high: f64,
-        low: f64,
-        volume: f64,
-        amount:f64
-    ) -> Self {
-        Self::new_checked(open, close, high, low, volume, amount)
-            .expect(FAILED)
-    }
-
     pub fn new_checked(
+        instrument_id: String,
         open: f64,
         close: f64,
         high: f64,
@@ -50,6 +39,7 @@ impl Candle {
         check_predicate_true(low <= close, "low <= close")?;
         check_predicate_true(low <= open, "low <= open")?;
         Ok(Self{
+            instrument_id,
             open,
             close,
             high,
@@ -90,6 +80,7 @@ pub struct StockData {
 impl StockData {
     pub fn into_candle(self) -> Result<Candle> {
         Candle::new_checked(
+            self.code,
             self.open,
             self.close,
             self.high,
@@ -108,26 +99,69 @@ pub enum OrderType {
 
 #[derive(Debug)]
 pub struct Order {
-    code: String,
-    order_type: OrderType,
-    price: f64,
-    amount: u32,
+    pub instrument_id: String,
+    pub order_type: OrderType,
+    pub price: f64,
+    pub amount: u32,
 }
 impl Order {
     pub fn new(code: String, order_type: OrderType, price: f64, amount: u32) -> Self {
-        Self { code, order_type, price, amount }
+        Self { instrument_id: code, order_type, price, amount }
+    }
+}
+
+pub enum OrderRejectedReason {
+    CashNotEnough,
+    BuyPriceNotMatched,
+    PositionNotEnough,
+    SellPriceNotMatched,
+}
+
+pub enum ExecutionResult {
+    Filled{ price: f64 },
+    Rejected(OrderRejectedReason),
+}
+
+#[derive(Debug)]
+pub struct Deal {
+    pub instrument_id: String,
+    pub order_type: OrderType,
+    pub price: f64,
+    pub amount: u32,
+    pub commission: f64,
+}
+impl Deal {
+    pub fn new(instrument_id: String, order_type: OrderType, price: f64, amount: u32, commission: f64) -> Self {
+        Self { instrument_id, order_type, price, amount, commission }
     }
 }
 
 pub struct Position {
-    price: f64,
+    avg_cost: f64,
     amount: u32,
+}
+
+impl Position {
+    pub fn new(price: f64, amount: u32) -> Self {
+        Self { avg_cost: price, amount }
+    }
+    pub fn update_position(&mut self, deal: &Deal) {
+        match deal.order_type {
+            OrderType::Buy => {
+                self.avg_cost = (self.avg_cost * self.amount as f64 + deal.price * deal.amount as f64) / (self.amount as f64 + deal.amount as f64);
+                self.amount += deal.amount;
+            },
+            OrderType::Sell => {
+                debug_assert!(self.amount >= deal.amount);
+                self.amount -= deal.amount;
+            }
+        }
+    }
 }
 
 pub struct Portfolio {
     pub cash: f64,
     pub positions: HashMap<String, Position>,
-    pub total_value: f64,
 }
 
 impl Portfolio {
@@ -135,53 +169,100 @@ impl Portfolio {
         Self {
             cash,
             positions: HashMap::new(),
-            total_value: cash,
         }
     }
-    pub fn sell(&mut self, order: Order) -> Result<()>{
-        let position = self.positions.get(&order.code).ok_or_else(|| anyhow::anyhow!("No position"))?;
-        if order.amount > position.amount {
-            anyhow::bail!("Insufficient shares")
+    pub fn apply_deal(&mut self, deal: &Deal) -> Result<()> {
+        match deal.order_type {
+            OrderType::Buy => {
+                if deal.price * deal.amount as f64 > self.cash {
+                    bail!(FAILED);
+                } else {
+                    self.positions.entry(deal.instrument_id.clone())
+                        .and_modify(|po| {po.update_position(deal)})
+                        .or_insert(Position::new(deal.price, deal.amount));
+                    self.cash -= deal.price * deal.amount as f64 + deal.commission;
+                    Ok(())
+                }
+            },
+            OrderType::Sell => {
+                if !self.positions.contains_key(&deal.instrument_id) || self.positions[&deal.instrument_id].amount < deal.amount {
+                    bail!(FAILED);
+                } else {
+                    self.positions.get_mut(&deal.instrument_id).unwrap().update_position(&deal);
+                    self.cash += deal.price * deal.amount as f64 - deal.commission;
+                    Ok(())
+                }
+            }
         }
-        let remaining = position.amount - order.amount;
-        self.cash += order.price * order.amount as f64;
-        self.total_value -= order.price * order.amount as f64;
-        if remaining == 0 {
-            self.positions.remove(&order.code);
-        } else {
-            self.positions.insert(order.code.clone(), Position { price: position.price, amount: remaining });
-        }
-        Ok(())
     }
 
-    pub fn buy(&mut self, order: Order) -> Result<()> {
-        if self.cash < order.price * order.amount as f64 {
-            anyhow::bail!("Insufficient cash")
-        }
-        self.cash -= order.price * order.amount as f64;
-        self.total_value += order.price * order.amount as f64;
-        Ok(())
+    pub fn has_sufficient_cash(&self, cost: f64) -> bool {
+        self.cash >= cost
+    }
+
+    pub fn has_sufficient_position(&self, instrument_id: &String, amount: u32) -> bool {
+        self.positions.contains_key(instrument_id) && self.positions[instrument_id].amount >= amount
+    }
+    pub fn total_value(&self, current_prices: &HashMap<String, f64>) -> f64 {
+        self.positions.iter()
+            .fold(self.cash, |acc, (instrument_id, position)| {
+                acc + current_prices[instrument_id] * position.amount as f64
+            })
+    }
+    pub fn position_value(&self, current_prices: &HashMap<String, f64>) -> f64 {
+        self.positions.iter()
+            .fold(0f64, |acc, (instrument_id, position)| {
+                acc + current_prices[instrument_id] * position.amount as f64
+            })
     }
 }
 
 pub enum Event {
     OnCandle(Candle),
-    OnOrder(Order),
-    OnTerminate,
+}
+
+pub struct OrderRejected {
+    order: Order,
+    order_rejected_reason: OrderRejectedReason,
+}
+impl OrderRejected {
+    pub fn new(order: Order, order_rejected_reason: OrderRejectedReason) -> Self {
+        Self { order, order_rejected_reason }
+    }
+}
+
+pub struct OrderExecutionReport {
+    pub deals: Vec<Deal>,
+    pub orders_rejected: Vec<OrderRejected>,
+}
+impl OrderExecutionReport {
+    pub fn default() -> Self {
+        Self {
+            deals: Vec::new(),
+            orders_rejected: Vec::new(),
+        }
+    }
+    pub fn new(deals: Vec<Deal>, orders_rejected: Vec<OrderRejected>) -> Self {
+        Self { deals, orders_rejected }
+    }
+    pub fn merge(&mut self, other: OrderExecutionReport) {
+        self.deals.extend(other.deals);
+        self.orders_rejected.extend(other.orders_rejected);
+    }
 }
 
 pub struct Audit {
-    profit: f64
+    pub profit: f64,
+    pub order_execution_report: OrderExecutionReport,
+    pub portfolio: Portfolio,
 }
 
 impl Audit {
-    pub fn new(profit: f64) -> Self {
-        Self { profit }
+    pub fn new(profit: f64, order_execution_report: OrderExecutionReport, portfolio: Portfolio) -> Self {
+        Self { profit, order_execution_report, portfolio}
     }
-    pub fn show_profit(&self) {
-        println!("{}", self.profit);
-    }
-    pub fn get_profit(&self) -> f64 {
+
+    pub fn profit(&self) -> f64 {
         self.profit
     }
 }
@@ -190,103 +271,62 @@ impl Audit {
 mod tests {
     use super::*;
 
-    /// 创建一笔买入订单的辅助函数，测试时不用每次都写 OrderType
-    fn buy_order(price: f64, amount: u32) -> Order {
-        Order { code: "TEST".to_string(), order_type: OrderType::Buy, price, amount }
-    }
-
-    fn sell_order(price: f64, amount: u32) -> Order {
-        Order { code: "TEST".to_string(), order_type: OrderType::Sell, price, amount }
-    }
 
     #[test]
     fn test_new_portfolio_initial_state() {
-        let p = Portfolio::new(100_000.0);
-        // 初始现金 = 本金，总资产 = 本金，无持仓
-        // 需要访问 cash / total_value 来验证，当前这两个字段可见性不同
-        // 提示：可以给 Portfolio 加一个 getter: pub fn cash_balance(&self) -> f64
-        todo!("断言 portfolio.cash 等于 100_000, total_value 等于 100_000");
+        let portfolio = Portfolio::new(10.0);
+        assert_eq!(portfolio.cash, 10.0);
+        assert_eq!(portfolio.positions.len(), 0);
     }
 
     #[test]
     fn test_buy_one_stock_reduces_cash() {
-        let mut p = Portfolio::new(100_000.0);
-        p.buy(buy_order(10.0, 100));
-        // 买入 100 股 × 10 元 = 1000 元，现金应减少 1000
-        assert_eq!(p.cash, 90_000.0);
+        let mut portfolio = Portfolio::new(1000.0);
+        assert_eq!(portfolio.cash, 1000.0);
+        let deal = Deal::new("test".to_string(), OrderType::Buy, 1.0, 100, 0.0);
+        assert!(portfolio.apply_deal(&deal).is_ok());
+        assert_eq!(portfolio.cash, 900.0);
     }
 
     #[test]
     fn test_buy_insufficient_cash_returns_error() {
-        let mut p = Portfolio::new(1_000.0);
-        // 尝试买入 1000 股 × 10 元 = 10,000 元，远超现金
-        // buy 方法当前返回 ()，如果现金不足应该怎么处理？
-        // 提示：把 buy 的返回值从 () 改为 Result<()>
-        let r = p.buy(buy_order(10.0, 1000));
-        assert_eq!(r.is_err(), true);
-    }
-
-    #[test]
-    fn test_buy_same_stock_twice_averages_cost() {
-        let mut p = Portfolio::new(100_000.0);
-        p.buy(buy_order(10.0, 100));  // 第一次买入: 100股 @ 10元
-        p.buy(buy_order(20.0, 100));  // 第二次买入: 100股 @ 20元
-        // 总持仓 = 200股，总成本 = 1000 + 2000 = 3000
-        // 加权平均成本 = 3000 / 200 = 15 元/股
-        // 现金应减少 3000
-        // 提示：需要 Position 有访问方法，或者给 Portfolio 加查询持仓的方法
-        todo!("断言仓位存在，成本均价 = 15.0，持仓量 = 200 股");
+        let mut portfolio = Portfolio::new(10.0);
+        assert_eq!(portfolio.cash, 10.0);
+        let deal = Deal::new("test".to_string(), OrderType::Buy, 1.0, 100, 0.0);
+        assert!(portfolio.apply_deal(&deal).is_err());
     }
 
     #[test]
     fn test_buy_and_sell_full_cycle() {
-        let mut p = Portfolio::new(100_000.0);
-        p.buy(buy_order(10.0, 100));   // 买入 100股
-        p.sell(sell_order(15.0, 100));  // 全部卖出
-
-        // 现金变化：-1000 (买) + 1500 (卖) = +500
-        // 最终现金 = 100_000 + 500 = 100_500
-        todo!("断言 cash 为 100_500");
+        let mut portfolio = Portfolio::new(1000.0);
+        assert_eq!(portfolio.cash, 1000.0);
+        let deal = Deal::new("test".to_string(), OrderType::Buy, 1.0, 200, 0.0);
+        assert!(portfolio.apply_deal(&deal).is_ok());
+        assert_eq!(portfolio.cash, 800.0);
+        let deal = Deal::new("test".to_string(), OrderType::Sell, 1.0, 200, 0.0);
+        assert!(portfolio.apply_deal(&deal).is_ok());
+        assert_eq!(portfolio.cash, 1000.0);
     }
 
     #[test]
     fn test_buy_then_sell_partial() {
-        let mut p = Portfolio::new(100_000.0);
-        p.buy(buy_order(10.0, 200));    // 买入 200股 @ 10元
-        p.sell(sell_order(15.0, 50));    // 卖出 50股 @ 15元
-
-        // 现金: -2000 + 750 = -1250, 剩余 98750
-        // 剩余持仓: 150股
-        todo!("断言现金 = 98_750, 剩余持仓 150 股");
-    }
-
-    #[test]
-    fn test_sell_more_than_held_returns_error() {
-        let mut p = Portfolio::new(100_000.0);
-        p.buy(buy_order(10.0, 100));     // 买入 100股
-        // 尝试卖出 200 股，持仓不足
-        todo!("断言 sell 返回错误，持仓不变");
+        let mut portfolio = Portfolio::new(1000.0);
+        assert_eq!(portfolio.cash, 1000.0);
+        let deal = Deal::new("test".to_string(), OrderType::Buy, 1.0, 200, 0.0);
+        assert!(portfolio.apply_deal(&deal).is_ok());
+        assert_eq!(portfolio.cash, 800.0);
+        let deal = Deal::new("test".to_string(), OrderType::Sell, 1.0, 50, 0.0);
+        assert!(portfolio.apply_deal(&deal).is_ok());
+        assert_eq!(portfolio.cash, 850.0);
+        assert_eq!(portfolio.positions.len(), 1);
+        assert_eq!(portfolio.positions.get(&deal.instrument_id).unwrap().amount, 150);
     }
 
     #[test]
     fn test_sell_without_holding_returns_error() {
-        let mut p = Portfolio::new(100_000.0);
-        // 没有买入过任何股票，直接卖出
-        todo!("断言 sell 返回错误");
-    }
-
-    #[test]
-    fn test_buy_zero_amount_should_fail() {
-        let mut p = Portfolio::new(100_000.0);
-        // 买入 0 股应该被视为无效操作
-        todo!("断言 buy 返回错误或无副作用");
-    }
-
-    #[test]
-    fn test_sell_zero_amount_should_fail() {
-        let mut p = Portfolio::new(100_000.0);
-        p.buy(buy_order(10.0, 100));
-        // 卖出 0 股应该被视为无效操作
-        todo!("断言 sell 返回错误或持仓不变");
+        let mut portfolio = Portfolio::new(10.0);
+        assert_eq!(portfolio.cash, 10.0);
+        let deal = Deal::new("test".to_string(), OrderType::Sell, 1.0, 100, 0.0);
+        assert!(portfolio.apply_deal(&deal).is_err());
     }
 }

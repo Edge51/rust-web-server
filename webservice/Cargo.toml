@@ -13,3 +13,4 @@ anyhow = "1.0.102"
 tokio = { version = "1.52.1", features = ["full"] }
 tokio-macros = { version = "0.2.0-alpha.6" }
 tokio-stream = "0.1.18"
+log = "0.4.22"
