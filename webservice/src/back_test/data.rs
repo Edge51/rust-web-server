@@ -220,6 +220,7 @@ impl SlippageConfig {
 }
 
 pub struct BacktestConfig {
+    pub initial_capital: f64,
     pub slippage_config: SlippageConfig,
     pub commission_rate: f64,
     pub min_commission: f64,
@@ -321,11 +322,12 @@ pub struct Audit {
     pub profit: f64,
     pub order_execution_report: OrderExecutionReport,
     pub portfolio: Portfolio,
+    pub equity_curve: Vec<f64>,
 }
 
 impl Audit {
-    pub fn new(profit: f64, order_execution_report: OrderExecutionReport, portfolio: Portfolio) -> Self {
-        Self { profit, order_execution_report, portfolio}
+    pub fn new(profit: f64, order_execution_report: OrderExecutionReport, portfolio: Portfolio, equity_curve: Vec<f64>) -> Self {
+        Self { profit, order_execution_report, portfolio, equity_curve}
     }
 
 }

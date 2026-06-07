@@ -72,12 +72,12 @@ where OrderStrategy: 'static + Strategy + Send
     }
 
     pub fn run_backtest(&mut self, backtest_config: BacktestConfig, candles: Vec<Candle>) -> Audit {
-        let initial_capital = 100000f64;
         let mut orders = Vec::new();
-        let mut portfolio = Portfolio::new(initial_capital);
+        let mut portfolio = Portfolio::new(backtest_config.initial_capital);
         let mut current_prices = HashMap::new();
         let mut slippage_model = SlippageModel::from(&backtest_config.slippage_config);
         let mut order_execution_report_summary = OrderExecutionReport::default();
+        let mut equity_curve = vec![backtest_config.initial_capital];
 
         for candle in candles {
             let order_execution_report = self.execute_orders(&backtest_config, &mut slippage_model, &portfolio, &candle, orders);
@@ -89,9 +89,10 @@ where OrderStrategy: 'static + Strategy + Send
             current_prices.entry(candle.instrument_id)
                 .and_modify(|value|{ *value = candle.close})
                 .or_insert(candle.close);
+            equity_curve.push(portfolio.total_value(&current_prices));
         }
 
-        Audit::new(portfolio.total_value(&current_prices) - initial_capital, order_execution_report_summary, portfolio)
+        Audit::new(portfolio.total_value(&current_prices) - backtest_config.initial_capital, order_execution_report_summary, portfolio, equity_curve)
     }
 
 }
@@ -123,7 +124,7 @@ mod test {
     fn test_run_backtest() {
         let candles = read_data_from_csv();
         let slippage_config = SlippageConfig::new(666, 0.01, 0.01, 0.01, 3);
-        let backtest_config = BacktestConfig { slippage_config, commission_rate: 8.54e-5, min_commission: 5.0};
+        let backtest_config = BacktestConfig { initial_capital: 100000f64, slippage_config, commission_rate: 8.54e-5, min_commission: 5.0};
         let current_price = HashMap::from([(candles.last().unwrap().instrument_id.clone(), candles.last().unwrap().close)]);
         let mut engine = Engine::new(DefaultStrategy);
         let audit = engine.run_backtest(backtest_config, candles);
@@ -137,7 +138,7 @@ mod test {
     fn test_execute_orders() {
         let engine = Engine::new(DefaultStrategy);
         let slippage_config = SlippageConfig::new(666, 0.01, 0.01, 0.01, 3);
-        let backtest_config = BacktestConfig { slippage_config, commission_rate: 8.54e-5, min_commission: 5.0};
+        let backtest_config = BacktestConfig { initial_capital: 100000f64, slippage_config, commission_rate: 8.54e-5, min_commission: 5.0};
         let mut slippage_model = SlippageModel::from(&backtest_config.slippage_config);
         let portfolio = Portfolio::new(10000f64);
         let candle = Candle::new_checked("test".to_string(), 10.0, 11.0, 11.5, 9.5, 100.0, 1100.0).unwrap();
