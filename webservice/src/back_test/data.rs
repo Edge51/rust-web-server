@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use anyhow::{bail, Result};
 use chrono::{NaiveDate};
 use serde::Deserialize;
+use rand_distr::{Distribution, Normal};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 pub const FAILED: &str = "Condition failed";
 #[derive(Debug, Clone)]
@@ -110,6 +113,44 @@ impl Order {
     }
 }
 
+pub struct SlippageModel {
+    pub buy_slippage: f64,
+    pub sell_slippage: f64,
+    pub sigma: f64,
+    pub n_sigma: u32,
+    pub rng: StdRng,
+}
+
+impl SlippageModel {
+
+    pub fn from(slippage_config: &SlippageConfig) -> Self{
+        Self {
+            buy_slippage: slippage_config.buy_slippage,
+            sell_slippage: slippage_config.sell_slippage,
+            sigma: slippage_config.sigma,
+            n_sigma: slippage_config.n_sigma,
+            rng: StdRng::seed_from_u64(slippage_config.seed),
+        }
+    }
+
+    pub fn slipped_price(&mut self, mean: f64, order_type: &OrderType) -> f64 {
+        let slippage_base = match order_type {
+            OrderType::Buy => {
+                mean + mean * self.buy_slippage
+            },
+            OrderType::Sell => {
+                mean - mean * self.sell_slippage
+            }
+        };
+        let normal = Normal::new(slippage_base, self.sigma.max(1e-6) * slippage_base).unwrap();
+        let normal_result = normal.sample(&mut self.rng);
+        if normal_result < 0.0 {
+            return 0.0;
+        }
+        normal_result.clamp(slippage_base - self.n_sigma as f64 * self.sigma * slippage_base, slippage_base + self.n_sigma as f64 * self.sigma * slippage_base)
+    }
+}
+
 pub enum OrderRejectedReason {
     CashNotEnough,
     BuyPriceNotMatched,
@@ -158,16 +199,30 @@ impl Position {
         }
     }
 }
-
-pub struct BacktestConfig {
-    pub commission_rate: f64,
-    pub min_commission: f64,
+pub struct SlippageConfig {
+    pub seed: u64,
+    pub buy_slippage: f64,
+    pub sell_slippage: f64,
+    pub sigma: f64,
+    pub n_sigma: u32,
 }
 
-impl BacktestConfig {
-    pub fn new(commission: f64, fix_commission: f64) -> Self {
-        Self { commission_rate: commission, min_commission: fix_commission }
+impl SlippageConfig {
+    pub fn new(seed: u64, buy_slippage: f64, sell_slippage: f64, sigma: f64, n_sigma: u32) -> Self {
+        Self {
+            seed,
+            buy_slippage,
+            sell_slippage,
+            sigma,
+            n_sigma,
+        }
     }
+}
+
+pub struct BacktestConfig {
+    pub slippage_config: SlippageConfig,
+    pub commission_rate: f64,
+    pub min_commission: f64,
 }
 
 pub struct Portfolio {
@@ -273,9 +328,6 @@ impl Audit {
         Self { profit, order_execution_report, portfolio}
     }
 
-    pub fn profit(&self) -> f64 {
-        self.profit
-    }
 }
 
 #[cfg(test)]

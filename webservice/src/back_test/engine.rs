@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::fs::File;
-use log::debug;
-use crate::back_test::data::{Audit, Candle, Event, StockData, Order, Portfolio, Deal, OrderType, ExecutionResult, OrderRejectedReason, OrderExecutionReport, OrderRejected, BacktestConfig};
+use crate::back_test::data::{Audit, Candle, Event, Order, Portfolio, Deal, OrderType, ExecutionResult, OrderRejectedReason, OrderExecutionReport, OrderRejected, BacktestConfig, SlippageModel,};
 use crate::back_test::strategy::Strategy;
 
 pub struct Engine<OrderStrategy>
@@ -20,7 +18,7 @@ where OrderStrategy: 'static + Strategy + Send
         }
     }
 
-    pub fn execute_orders(&self, backtest_config: &BacktestConfig, portfolio: &Portfolio, candle: &Candle, orders: Vec<Order>) -> OrderExecutionReport {
+    pub fn execute_orders(&self, backtest_config: &BacktestConfig, slippage_model: &mut SlippageModel, portfolio: &Portfolio, candle: &Candle, orders: Vec<Order>) -> OrderExecutionReport {
         let mut deals = Vec::new();
         let mut orders_rejected = Vec::new();
         for order in orders {
@@ -46,20 +44,21 @@ where OrderStrategy: 'static + Strategy + Send
             };
             match execute_result {
                 ExecutionResult::Filled {price} => {
-                    let commission = f64::max(backtest_config.min_commission, price * order.amount as f64 * backtest_config.commission_rate);
+                    let slipped_price = slippage_model.slipped_price(price, &order.order_type);
+                    let commission = f64::max(backtest_config.min_commission, slipped_price * order.amount as f64 * backtest_config.commission_rate);
                     match order.order_type {
                         OrderType::Buy => {
-                            if !portfolio.has_sufficient_cash(commission + price * order.amount as f64) {
+                            if !portfolio.has_sufficient_cash(commission + slipped_price * order.amount as f64) {
                                 orders_rejected.push(OrderRejected::new(order, OrderRejectedReason::CashNotEnough));
                             } else {
-                                deals.push(Deal::new(order.instrument_id, order.order_type, price, order.amount, commission));
+                                deals.push(Deal::new(order.instrument_id, order.order_type, slipped_price, order.amount, commission));
                             }
                         },
                         OrderType::Sell => {
                             if !portfolio.has_sufficient_position(&order.instrument_id, order.amount) {
                                 orders_rejected.push(OrderRejected::new(order, OrderRejectedReason::PositionNotEnough));
                             } else {
-                                deals.push(Deal::new(order.instrument_id, order.order_type, price, order.amount, commission));
+                                deals.push(Deal::new(order.instrument_id, order.order_type, slipped_price, order.amount, commission));
                             }
                         }
                     }
@@ -77,10 +76,11 @@ where OrderStrategy: 'static + Strategy + Send
         let mut orders = Vec::new();
         let mut portfolio = Portfolio::new(initial_capital);
         let mut current_prices = HashMap::new();
+        let mut slippage_model = SlippageModel::from(&backtest_config.slippage_config);
         let mut order_execution_report_summary = OrderExecutionReport::default();
 
         for candle in candles {
-            let order_execution_report = self.execute_orders(&backtest_config, &portfolio, &candle, orders);
+            let order_execution_report = self.execute_orders(&backtest_config, &mut slippage_model, &portfolio, &candle, orders);
             for deal in &order_execution_report.deals {
                 portfolio.apply_deal(deal).unwrap();
             }
@@ -98,7 +98,7 @@ where OrderStrategy: 'static + Strategy + Send
 
 #[cfg(test)]
 mod test {
-    use crate::back_test::data::BacktestConfig;
+    use crate::back_test::data::{BacktestConfig, SlippageConfig};
     use crate::back_test::data_loader::read_data_from_csv;
     use crate::back_test::strategy::DefaultStrategy;
     use super::*;
@@ -122,7 +122,8 @@ mod test {
     #[test]
     fn test_run_backtest() {
         let candles = read_data_from_csv();
-        let backtest_config = BacktestConfig { commission_rate: 8.54e-5, min_commission: 5.0};
+        let slippage_config = SlippageConfig::new(666, 0.01, 0.01, 0.01, 3);
+        let backtest_config = BacktestConfig { slippage_config, commission_rate: 8.54e-5, min_commission: 5.0};
         let current_price = HashMap::from([(candles.last().unwrap().instrument_id.clone(), candles.last().unwrap().close)]);
         let mut engine = Engine::new(DefaultStrategy);
         let audit = engine.run_backtest(backtest_config, candles);
@@ -134,12 +135,14 @@ mod test {
 
     #[test]
     fn test_execute_orders() {
-        let mut engine = Engine::new(DefaultStrategy);
-        let backtest_config = BacktestConfig { commission_rate: 8.54e-5, min_commission: 5.0};
+        let engine = Engine::new(DefaultStrategy);
+        let slippage_config = SlippageConfig::new(666, 0.01, 0.01, 0.01, 3);
+        let backtest_config = BacktestConfig { slippage_config, commission_rate: 8.54e-5, min_commission: 5.0};
+        let mut slippage_model = SlippageModel::from(&backtest_config.slippage_config);
         let portfolio = Portfolio::new(10000f64);
         let candle = Candle::new_checked("test".to_string(), 10.0, 11.0, 11.5, 9.5, 100.0, 1100.0).unwrap();
         let orders = vec![Order::new("test".to_string(), OrderType::Buy, 11.0, 100)];
-        let report = engine.execute_orders(&backtest_config, &portfolio, &candle, orders);
+        let report = engine.execute_orders(&backtest_config, &mut slippage_model, &portfolio, &candle, orders);
         assert!(report.deals.len() > 0);
     }
 }
