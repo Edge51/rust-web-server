@@ -85,7 +85,7 @@ where OrderStrategy: 'static + Strategy + Send
                 portfolio.apply_deal(deal).unwrap();
             }
             order_execution_report_summary.merge(order_execution_report);
-            orders = self.strategy.generate_orders(Event::OnCandle(candle.clone())).collect();
+            orders = self.strategy.generate_orders(Event::OnCandle(&candle)).collect();
             current_prices.entry(candle.instrument_id)
                 .and_modify(|value|{ *value = candle.close})
                 .or_insert(candle.close);

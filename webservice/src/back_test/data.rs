@@ -284,8 +284,8 @@ impl Portfolio {
     }
 }
 
-pub enum Event {
-    OnCandle(Candle),
+pub enum Event<'a> {
+    OnCandle(&'a Candle),
 }
 
 pub struct OrderRejected {

@@ -13,9 +13,9 @@ impl Strategy for DefaultStrategy {
         let order = match event {
             Event::OnCandle(candle) => {
                 if candle.close >= 400.0 {
-                    Some(Order::new(candle.instrument_id, OrderType::Sell, candle.close, 100))
+                    Some(Order::new(candle.instrument_id.clone(), OrderType::Sell, candle.close, 100))
                 } else if candle.close <= 200.0 {
-                    Some(Order::new(candle.instrument_id, OrderType::Buy, candle.close, 100))
+                    Some(Order::new(candle.instrument_id.clone(), OrderType::Buy, candle.close, 100))
                 } else {
                     None
                 }
