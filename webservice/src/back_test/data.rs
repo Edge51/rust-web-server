@@ -159,6 +159,17 @@ impl Position {
     }
 }
 
+pub struct BacktestConfig {
+    pub commission_rate: f64,
+    pub min_commission: f64,
+}
+
+impl BacktestConfig {
+    pub fn new(commission: f64, fix_commission: f64) -> Self {
+        Self { commission_rate: commission, min_commission: fix_commission }
+    }
+}
+
 pub struct Portfolio {
     pub cash: f64,
     pub positions: HashMap<String, Position>,
