@@ -97,6 +97,20 @@ where OrderStrategy: 'static + Strategy + Send
 
 }
 
+pub fn max_drawdown(equity_curve: &Vec<f64>) -> f64 {
+    if equity_curve.len() < 1 {
+        return 0.0;
+    }
+    let mut peak = equity_curve[0];
+    let mut max_drawdown = 0.0;
+    for equity in equity_curve {
+        peak = peak.max(*equity);
+        let current_drawdown = (peak - equity) / peak;
+        max_drawdown = f64::max(max_drawdown, current_drawdown);
+    }
+    max_drawdown
+}
+
 #[cfg(test)]
 mod test {
     use crate::back_test::data::{BacktestConfig, SlippageConfig};
@@ -145,5 +159,12 @@ mod test {
         let orders = vec![Order::new("test".to_string(), OrderType::Buy, 11.0, 100)];
         let report = engine.execute_orders(&backtest_config, &mut slippage_model, &portfolio, &candle, orders);
         assert!(report.deals.len() > 0);
+    }
+
+    #[test]
+    fn test_max_drawdown() {
+        let equity_curve = vec![ 80f64, 90f64, 110f64, 80f64, 70f64, 100f64, 50f64];
+        let max_drawdown = max_drawdown(&equity_curve);
+        assert_eq!(max_drawdown, 60f64 / 110f64);
     }
 }
